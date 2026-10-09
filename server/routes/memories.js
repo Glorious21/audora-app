@@ -4,7 +4,7 @@
  */
 import { Router } from "express";
 import { getMemWal, withRetry, pollRememberJob } from "../lib/memwal.js";
-import { formatMemory, parseMemory, validateCapture } from "../../shared/memory.js";
+import { formatMemory, isTestMemory, memoryKey, parseMemory, validateCapture } from "../../shared/memory.js";
 
 export const memoriesRouter = Router();
 
@@ -98,21 +98,22 @@ memoriesRouter.get("/search", async (req, res) => {
     // hiccup rather than throwing. Retry a few times before trusting "nothing".
     let result;
     for (let attempt = 1; attempt <= 3; attempt++) {
-      result = await withRetry(() => memwal.recall({ query, limit: 12 }), {
+      result = await withRetry(() => memwal.recall({ query, limit: 20 }), {
         label: "recall",
       });
       if (result.results.length > 0 || attempt === 3) break;
       await new Promise((r) => setTimeout(r, 1200));
     }
 
-    // The same idea captured more than once (re-running the demo, re-saving
-    // with tweaked notes) comes back as several hits. Results arrive closest
-    // first, so keep only the best match per type + title.
+    // Connection-test writes are hidden. The same idea captured more than once
+    // (re-running the demo, re-saving with tweaked notes) comes back as several
+    // hits. Results arrive closest first, so keep only the best match per idea.
     const seen = new Set();
     const results = [];
     for (const r of result.results) {
       const fields = parseMemory(r.text);
-      const id = fields.title ? `${fields.type}|${fields.title.toLowerCase()}` : r.text;
+      if (isTestMemory(fields, r.text)) continue;
+      const id = memoryKey(fields, r.text);
       if (seen.has(id)) continue;
       seen.add(id);
       results.push({

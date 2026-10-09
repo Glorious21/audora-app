@@ -42,7 +42,14 @@ function Bubble({ msg }) {
     >
       <div style={{ maxWidth: "min(620px, 88%)" }}>
         {!mine && (
-          <div className="kicker" style={{ marginBottom: 6 }}>Audora</div>
+          <div className="kicker" style={{ marginBottom: 6 }}>
+            Audora
+            {msg.mode === "recall" && (
+              <span style={{ color: "var(--text-2)", fontWeight: 500, letterSpacing: 0, textTransform: "none", marginLeft: 8 }}>
+                Answered from your vault
+              </span>
+            )}
+          </div>
         )}
         <div
           className={msg.error ? "alert" : undefined}
@@ -93,7 +100,7 @@ export default function ChatPanel() {
     const ctrl = (inflight.current = new AbortController());
     try {
       const res = await api.chat(history.map(({ role, content }) => ({ role, content })), ctrl.signal);
-      setMessages((prev) => [...prev, { role: "assistant", content: res.reply, sources: res.sources }]);
+      setMessages((prev) => [...prev, { role: "assistant", content: res.reply, sources: res.sources, mode: res.mode }]);
     } catch (e) {
       if (ctrl.signal.aborted) return;
       setMessages((prev) => [...prev, { role: "assistant", content: e.message, error: true }]);

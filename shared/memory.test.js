@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { formatMemory, parseMemory, validateCapture, FIELD_LIMITS } from "./memory.js";
+import { formatMemory, isTestMemory, memoryKey, parseMemory, validateCapture, FIELD_LIMITS } from "./memory.js";
 
 const FULL = {
   title: "Third Mainland at 2AM",
@@ -41,6 +41,24 @@ test("parses memories written before this module existed", () => {
   assert.equal(f.date, "2026-08-12");
   assert.equal(f.bpm, "");
   assert.equal(f.notes, "Hummed a full chorus at a red light. Da-da-DAAA, then it falls.");
+});
+
+test("memoryKey ignores dash and case differences", () => {
+  const a = memoryKey({ type: "voice note", title: "car hum — chorus melody" });
+  const b = memoryKey({ type: "voice note", title: "Car Hum - chorus melody" });
+  assert.equal(a, b);
+  assert.notEqual(a, memoryKey({ type: "beat", title: "car hum — chorus melody" }));
+  assert.equal(memoryKey({}, "raw text"), "raw text");
+});
+
+test("isTestMemory hides debugging writes, keeps real ideas", () => {
+  for (const title of ["curl smoke test beat", "Endpoint Test Loop 2", "watch repro beat", "stability check 3"]) {
+    assert.ok(isTestMemory({ title }), title);
+  }
+  assert.ok(isTestMemory({}, "Track: Sunset Test Beat (step0-connection-test). Date added: 2026-08-27"));
+  for (const title of ["car hum — chorus melody", "fire", "hope", "Third Mainland at 2AM"]) {
+    assert.ok(!isTestMemory({ title, notes: "needs real drums" }), title);
+  }
 });
 
 test("parseMemory tolerates garbage", () => {

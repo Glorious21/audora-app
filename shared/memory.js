@@ -76,6 +76,29 @@ export function parseMemory(text = "") {
 }
 
 /**
+ * Identity of a memory for de-duplication: the same idea saved twice, or with
+ * "—" vs "-" in the title, collapses to one key.
+ */
+export function memoryKey(fields = {}, text = "") {
+  const title = clean(fields.title)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+  return title ? `${clean(fields.type).toLowerCase()}|${title}` : text;
+}
+
+/**
+ * Memories written by connection tests and debugging (step0, curl smoke tests,
+ * relayer repro loops). Walrus Memory has no delete, so recall hides them.
+ */
+const TEST_MEMORY =
+  /\b(smoke test|endpoint (test|check)|stability check|watch repro|repro ?\d*|diagnostic|probe|step0|connection[- ]test|write path|safe to ignore)\b/i;
+
+export function isTestMemory(fields = {}, text = "") {
+  return TEST_MEMORY.test(`${clean(fields.title)} ${clean(fields.notes)}`) || (!fields.title && TEST_MEMORY.test(text));
+}
+
+/**
  * Validate and normalise a capture request body. Returns `{ fields }` on
  * success or `{ error }` with a message suitable for a 400 response.
  */

@@ -6,7 +6,7 @@
 import { Router } from "express";
 import Anthropic from "@anthropic-ai/sdk";
 import { getMemWal, withRetry } from "../lib/memwal.js";
-import { parseMemory } from "../../shared/memory.js";
+import { isTestMemory, memoryKey, parseMemory } from "../../shared/memory.js";
 
 export const chatRouter = Router();
 
@@ -40,14 +40,15 @@ function cleanMessages(raw) {
 
 async function recallFor(query) {
   const memwal = getMemWal();
-  const result = await withRetry(() => memwal.recall({ query: query.slice(0, 300), limit: 8 }), {
+  const result = await withRetry(() => memwal.recall({ query: query.slice(0, 300), limit: 16 }), {
     label: "recall",
   });
   const seen = new Set();
   const sources = [];
   for (const r of result.results) {
     const fields = parseMemory(r.text);
-    const id = fields.title ? `${fields.type}|${fields.title.toLowerCase()}` : r.text;
+    if (isTestMemory(fields, r.text)) continue;
+    const id = memoryKey(fields, r.text);
     if (seen.has(id)) continue;
     seen.add(id);
     sources.push({
@@ -57,13 +58,59 @@ async function recallFor(query) {
       fields,
     });
   }
-  return sources;
+  return sources.slice(0, 8);
+}
+
+// After an auth or billing failure, answer from recall for this long before trying Claude again.
+const CLAUDE_RETRY_MS = 5 * 60_000;
+let claudeDownUntil = 0;
+
+const UNFINISHED = /\b(unfinished|not (yet )?(done|finished)|still|need|needs|missing|finish|incomplete|wip)\b/i;
+const trimDots = (s) => String(s || "").trim().replace(/\.+$/, "");
+
+/**
+ * A grounded answer built only from the recalled memories, used when Claude
+ * can't be reached. Names the closest matches, their stage, the story and
+ * where each one lives.
+ */
+function recallAnswer(question, sources) {
+  let picks = sources;
+  if (UNFINISHED.test(question)) picks = picks.filter((s) => s.fields.status !== "done");
+  const best = picks[0]?.relevance ?? 0;
+  picks = picks.filter((s) => (s.relevance ?? 0) >= best - 0.12).slice(0, 3);
+
+  if (!picks.length) {
+    return {
+      reply: "I couldn't find anything in your vault that matches that. Try describing it another way, or capture it first.",
+      sources,
+      model: null,
+      mode: "recall",
+    };
+  }
+
+  const describe = (s) => {
+    const f = s.fields;
+    const meta = [f.type, f.status && `${f.status} stage`, f.bpm && `${f.bpm} BPM`, f.key].filter(Boolean).join(", ");
+    return [
+      `• "${f.title || "Untitled"}"${meta ? ` (${meta})` : ""}`,
+      f.notes && `  ${trimDots(f.notes)}.`,
+      f.location && `  Lives in: ${trimDots(f.location)}.`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  };
+
+  const lead =
+    picks.length === 1
+      ? `The closest match in your vault is "${picks[0].fields.title || "Untitled"}".`
+      : "These are the closest matches in your vault, best first:";
+  return { reply: `${lead}\n\n${picks.map(describe).join("\n\n")}`, sources: picks, model: null, mode: "recall" };
 }
 
 /**
  * POST /api/chat
  * body: { messages: [{ role: "user" | "assistant", content: string }, ...] }
- * → { reply, sources, model }
+ * → { reply, sources, model, mode? }   mode "recall" = answered without Claude
  */
 chatRouter.post("/", async (req, res) => {
   const messages = cleanMessages(req.body?.messages);
@@ -93,6 +140,8 @@ chatRouter.post("/", async (req, res) => {
     },
   ];
 
+  if (Date.now() < claudeDownUntil) return res.json(recallAnswer(question, sources));
+
   try {
     const response = await getClient().beta.messages.create({
       model: MODEL,
@@ -118,28 +167,12 @@ chatRouter.post("/", async (req, res) => {
       .trim();
     return res.json({ reply, sources, model: response.model });
   } catch (err) {
-    console.error("POST /api/chat Claude call failed:", err);
-    if (err instanceof Anthropic.AuthenticationError) {
-      return res.status(503).json({
-        error: "AI chat is not configured",
-        detail: "Set ANTHROPIC_API_KEY in .env to enable chat.",
-        sources,
-      });
-    }
-    if (err instanceof Anthropic.RateLimitError) {
-      return res.status(429).json({ error: "AI chat is busy, try again in a moment", sources });
-    }
-    if (err instanceof Anthropic.APIError) {
-      return res.status(502).json({ error: "AI chat failed", detail: err.message, sources });
-    }
-    // No credentials at all: the SDK throws before any request is sent.
-    if (/api.?key|auth/i.test(err.message)) {
-      return res.status(503).json({
-        error: "AI chat is not configured",
-        detail: "Set ANTHROPIC_API_KEY in .env to enable chat.",
-        sources,
-      });
-    }
-    return res.status(502).json({ error: "AI chat failed", detail: err.message, sources });
+    // No key, no credits, rate limited or offline: answer from the recalled
+    // memories instead, so the chat still works. After an account-level
+    // failure, skip Claude for a few minutes so every turn isn't slowed by it.
+    const reason = err instanceof Anthropic.APIError ? err.error?.error?.message || err.message : err.message;
+    console.warn("POST /api/chat: Claude unavailable, answering from recall:", reason);
+    if (!(err instanceof Anthropic.RateLimitError)) claudeDownUntil = Date.now() + CLAUDE_RETRY_MS;
+    return res.json(recallAnswer(question, sources));
   }
 });
