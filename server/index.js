@@ -3,7 +3,7 @@
  *
  * Builds the Express app from server/app.js and listens on $PORT. Once
  * `npm run build` has produced dist/, the app also serves the built UI.
- * On Vercel this file is unused — see api/[...path].js.
+ * On Vercel this file is unused — see api/index.js.
  */
 import "dotenv/config";
 import fs from "node:fs";

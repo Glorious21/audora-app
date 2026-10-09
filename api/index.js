@@ -1,5 +1,6 @@
 /**
- * Vercel serverless entry — every /api/* request is routed here.
+ * Vercel serverless entry. vercel.json rewrites every /api/* path here, and
+ * Vercel keeps the original req.url, so Express routes match as usual.
  *
  * Vercel serves the built UI (dist/) as static assets and rewrites all other
  * paths to index.html (see vercel.json), so this function only handles the API.

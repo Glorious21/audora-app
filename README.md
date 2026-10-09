@@ -114,7 +114,7 @@ npm start                     # Express serves the API + the built UI on :3001
 
 `vercel.json` is committed. The Vite UI builds to `dist/` (served as static
 assets); every `/api/*` request is routed to a single serverless function
-(`api/[...path].js`) that runs the same Express app via `createApp()`.
+(`api/index.js`) that runs the same Express app via `createApp()`.
 
 ```bash
 npx vercel            # first run: log in + link the project
@@ -162,7 +162,7 @@ server/                Express API — holds the MemWal delegate key
   index.js  dev.js     standalone-server entrypoints (dev.js skips dist/)
   lib/memwal.js        the only place the MemWal client is created
   routes/memories.js   capture / status / recall
-api/[...path].js       Vercel serverless entry — runs createApp()
+api/index.js           Vercel serverless entry — runs createApp()
 scripts/step0-*.js     standalone connection test
 ```
 

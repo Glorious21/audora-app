@@ -2,7 +2,7 @@
  * Audora — Express app factory.
  *
  * Shared by the standalone server (server/index.js) and the Vercel serverless
- * function (api/[...path].js). The delegate key is read from the environment
+ * function (api/index.js). The delegate key is read from the environment
  * here and NEVER sent to the browser.
  *
  *   GET  /api                      → API info
@@ -12,6 +12,7 @@
  *   GET  /api/memories/search?q=   → natural-language recall
  *   POST /api/chat                 → AI chat grounded in the vault
  */
+import "./env.js";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
