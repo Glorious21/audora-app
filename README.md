@@ -130,16 +130,18 @@ these Environment Variables in the Vercel project:
 | `MEMWAL_KEY` | your Ed25519 delegate key |
 | `MEMWAL_SERVER_URL` | `https://relayer.memory.walrus.xyz` |
 | `MEMWAL_NAMESPACE` | `audora-demo` |
+| `ANTHROPIC_API_KEY` | your Anthropic API key, for the Ask Audora chat |
 
 ### Deploy (Render)
 
 `render.yaml` is a Blueprint. In Render: **New → Blueprint**, connect this repo,
-then set the two secrets when prompted:
+then set the secrets when prompted:
 
 | var | value |
 |---|---|
 | `MEMWAL_ACCOUNT_ID` | your Walrus Memory account object ID |
 | `MEMWAL_KEY` | your Ed25519 delegate key |
+| `ANTHROPIC_API_KEY` | your Anthropic API key, for the Ask Audora chat |
 
 `MEMWAL_SERVER_URL` and `MEMWAL_NAMESPACE` are set by the blueprint. Build runs
 `npm install && npm run build`; the service starts with `npm start` and Express

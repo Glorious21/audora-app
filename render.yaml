@@ -16,6 +16,8 @@ services:
         sync: false
       - key: MEMWAL_KEY
         sync: false
+      - key: ANTHROPIC_API_KEY  # AI chat (POST /api/chat)
+        sync: false
       # Non-secret config.
       - key: MEMWAL_SERVER_URL
         value: https://relayer.memory.walrus.xyz
