@@ -14,7 +14,7 @@
   },
   "homepage": "https://github.com/Glorious21/Audora#readme",
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   },
   "scripts": {
     "step0": "node scripts/step0-connection-test.js",

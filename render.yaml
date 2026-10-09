@@ -24,4 +24,4 @@ services:
       - key: MEMWAL_NAMESPACE
         value: audora-demo
       - key: NODE_VERSION
-        value: "20"
+        value: "24"
