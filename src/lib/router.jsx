@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 
 /**
- * Tiny history-API router — enough for Audora's two routes (/ and /studio)
+ * Tiny history-API router — enough for Audora's handful of routes
  * without pulling in react-router. Exposes `useRoute()` → { path, navigate }
  * and a <Link> component. Vite's dev server and the Express SPA fallback both
  * serve index.html for unknown paths, so deep links work.

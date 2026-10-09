@@ -1,82 +1,58 @@
-import { motion } from "framer-motion";
-import Icon from "./Icon";
-import { TYPE_GLYPH } from "../lib/format";
+import Icon, { TYPE_ICON } from "./Icon";
+import { stageLabel } from "./Stage";
 
-/** Compact list of what's been captured this session — fills the left rail
- *  and doubles as quick "recall this" shortcuts. */
+/** "This session" — what's been stored so far, each a one-click recall. */
 export default function SessionList({ captures, onRecall }) {
   if (!captures.length) return null;
-
   return (
-    <section className="panel" style={{ padding: 16 }}>
-      <div className="kicker" style={{ marginBottom: 10 }}>
-        Captured this session · {captures.length}
+    <section className="card rise" style={{ padding: 22 }} aria-label="This session">
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+        <h3 style={{ fontSize: 15, fontWeight: 650 }}>This session</h3>
+        <span style={{ fontSize: 12, color: "var(--text-2)" }}>{captures.length} stored</span>
       </div>
-      <div style={{ display: "grid", gap: 8 }}>
-        {captures.map((c) => (
-          <motion.div
-            key={c.job_id}
-            initial={{ opacity: 0, x: -8 }}
-            animate={{ opacity: 1, x: 0 }}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              padding: "9px 10px",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--panel-2)",
-              border: "1px solid var(--line)",
-            }}
-          >
-            <span style={{ fontSize: 14, color: "var(--amber)" }}>
-              {TYPE_GLYPH[c.fields?.type] || "◆"}
-            </span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  fontSize: 13,
-                  fontWeight: 550,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {c.fields?.title || "—"}
-              </div>
-              <div
-                className="mono"
-                style={{
-                  fontSize: 10.5,
-                  color: c.finalized ? "var(--green)" : "var(--text-3)",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {c.blob_id ? `blob ${c.blob_id.slice(0, 14)}…` : `job ${c.job_id.slice(0, 10)}… · finalizing`}
-              </div>
-            </div>
-            <button
-              onClick={() => onRecall?.(c.fields?.title)}
-              title="recall this"
+      <div style={{ display: "grid", marginTop: 8 }}>
+        {captures.map((c, i) => {
+          const f = c.fields || {};
+          return (
+            <div
+              key={c.job_id}
               style={{
-                display: "inline-flex",
+                display: "flex",
                 alignItems: "center",
-                gap: 4,
-                fontSize: 11,
-                padding: "5px 9px",
-                borderRadius: 7,
-                border: "1px solid var(--line)",
-                background: "none",
-                color: "var(--text-2)",
-                cursor: "pointer",
+                gap: 12,
+                padding: "12px 0",
+                borderTop: i ? "1px solid var(--line)" : "none",
               }}
             >
-              <Icon name="search" size={11} />
-              recall
-            </button>
-          </motion.div>
-        ))}
+              <span
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 9,
+                  background: "var(--wash)",
+                  color: "var(--accent-strong)",
+                  display: "grid",
+                  placeItems: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <Icon name={TYPE_ICON[f.type] || "dot"} size={15} />
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14.5, fontWeight: 650, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {f.title || "Untitled"}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-2)" }}>
+                  {stageLabel(f.type)} · {stageLabel(f.status)}
+                  {!c.finalized && " · finalizing"}
+                </div>
+              </div>
+              <button type="button" className="link-btn" onClick={() => onRecall?.(f.title)}>
+                recall this <Icon name="arrowUpRight" size={13} stroke={2} />
+              </button>
+            </div>
+          );
+        })}
       </div>
     </section>
   );

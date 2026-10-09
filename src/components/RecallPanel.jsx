@@ -1,226 +1,287 @@
-import { useEffect, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { useEffect, useRef, useState } from "react";
+import { motion } from "framer-motion";
 import { api } from "../api";
 import Icon from "./Icon";
 import MemoryCard from "./MemoryCard";
+import { useSession } from "../lib/session";
 
 const EXAMPLES = [
   "the amapiano idea with the vocal chop from that late session",
-  "lyrics about leaving Lagos",
-  "dark trap beat with the piano, no drums yet",
-  "voice note where I hummed a chorus in the car",
+  "the story idea about the lighthouse keeper",
+  "something slow I hummed on the way home",
+  "the song I started with Jonah",
 ];
 
-export default function RecallPanel({ pendingQuery, onConsumeQuery }) {
+function Toggle({ on, onChange, label }) {
+  return (
+    <label style={{ display: "inline-flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+      {label}
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        onClick={() => onChange(!on)}
+        style={{
+          width: 34,
+          height: 20,
+          borderRadius: 999,
+          border: "none",
+          padding: 2,
+          cursor: "pointer",
+          background: on ? "var(--ink)" : "var(--line-strong)",
+          display: "flex",
+          justifyContent: on ? "flex-end" : "flex-start",
+        }}
+      >
+        <span style={{ width: 16, height: 16, borderRadius: "50%", background: "var(--surface)" }} />
+      </button>
+    </label>
+  );
+}
+
+function Skeletons() {
+  return (
+    <div style={{ display: "grid", gap: 16 }} aria-hidden>
+      {[1, 0.75, 0.5].map((o, i) => (
+        <div
+          key={i}
+          className="card"
+          style={{ opacity: o, padding: "18px 20px", display: "grid", gap: 12, boxShadow: "none" }}
+        >
+          {[["30%", 10], ["55%", 26], ["90%", 12], ["70%", 12]].map(([w, h], j) => (
+            <div
+              key={j}
+              style={{
+                width: w,
+                height: h,
+                borderRadius: 6,
+                background: "var(--line)",
+                animation: `pulse 1.4s ease-in-out ${i * 120}ms infinite`,
+              }}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Empty({ onPick }) {
+  const { runDemo, demoRunning, captures } = useSession();
+  return (
+    <div className="card rise" style={{ padding: "32px 28px" }}>
+      <h2 style={{ fontSize: 34 }}>
+        Describe it the way <em>you remember it</em>.
+      </h2>
+      <p style={{ marginTop: 10, fontSize: 14.5, color: "var(--text-2)" }}>
+        Recall searches by meaning, not by filename. Try one of these:
+      </p>
+      <div style={{ display: "grid", gap: 8, marginTop: 18 }}>
+        {EXAMPLES.map((ex) => (
+          <button
+            key={ex}
+            type="button"
+            onClick={() => onPick(ex)}
+            className="lift"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              padding: "12px 16px",
+              borderRadius: 12,
+              border: "1px solid var(--line)",
+              background: "var(--bg)",
+              color: "var(--ink)",
+              cursor: "pointer",
+              fontSize: 14,
+              textAlign: "left",
+            }}
+          >
+            {ex}
+            <span style={{ color: "var(--accent-strong)" }}><Icon name="arrowRight" size={15} /></span>
+          </button>
+        ))}
+      </div>
+      {captures.length === 0 && (
+        <div
+          style={{
+            marginTop: 22,
+            paddingTop: 20,
+            borderTop: "1px solid var(--line)",
+            display: "flex",
+            alignItems: "center",
+            gap: 16,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ fontSize: 14.5, fontWeight: 650 }}>First time here?</div>
+            <div style={{ fontSize: 13, color: "var(--text-2)", marginTop: 2 }}>
+              The demo stores four sample memories, then recalls one cold.
+            </div>
+          </div>
+          <button type="button" className="btn btn-ghost" onClick={runDemo} disabled={demoRunning}>
+            <Icon name="play" size={13} stroke={2} />
+            {demoRunning ? "Storing demo memories" : "Run 2-min demo"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function RecallPanel({ inputRef: externalRef, compact = false }) {
+  const { pendingQuery, setPendingQuery } = useSession();
   const [q, setQ] = useState("");
-  const [focus, setFocus] = useState(false);
   const [busy, setBusy] = useState(false);
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const [showRaw, setShowRaw] = useState(false);
+  const localRef = useRef(null);
+  const inputRef = externalRef || localRef;
+  const inflight = useRef(null);
 
+  // A new recall supersedes the one in flight instead of being dropped.
   async function run(query) {
     const term = (query ?? q).trim();
-    if (!term || busy) return;
+    if (!term) return;
+    inflight.current?.abort();
+    const ctrl = (inflight.current = new AbortController());
     setQ(term);
     setBusy(true);
     setError(null);
     try {
-      setData(await api.recall(term));
+      const res = await api.recall(term, ctrl.signal);
+      if (!ctrl.signal.aborted) setData(res);
     } catch (e) {
+      if (ctrl.signal.aborted) return;
       setError(e.message);
       setData(null);
     } finally {
-      setBusy(false);
+      if (inflight.current === ctrl) setBusy(false);
     }
   }
 
-  // a capture's title can be pushed in from the left panel
+  useEffect(() => () => inflight.current?.abort(), []);
+
+  // The demo and "recall this" links push a query in from elsewhere.
   useEffect(() => {
     if (pendingQuery) {
       run(pendingQuery);
-      onConsumeQuery?.();
+      setPendingQuery(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingQuery]);
 
+  const results = data?.results || [];
+
   return (
-    <section className="panel" style={{ display: "flex", flexDirection: "column", minHeight: 520 }}>
-      <div style={{ padding: "16px 18px", borderBottom: "1px solid var(--line)" }}>
-        <div className="kicker">Recall</div>
-        <div style={{ marginTop: 4, fontSize: 15, fontWeight: 650 }}>Find it by meaning</div>
-        <div style={{ fontSize: 12.5, color: "var(--text-3)", marginTop: 2 }}>
-          Describe the memory the way you'd remember it — not the filename.
-        </div>
-
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            run();
+    <section style={{ display: "grid", gap: 16, alignContent: "start" }} aria-label="Recall">
+      <form
+        role="search"
+        onSubmit={(e) => {
+          e.preventDefault();
+          run();
+        }}
+        className="rise"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: compact ? "6px 6px 6px 14px" : "8px 8px 8px 18px",
+          borderRadius: compact ? 14 : 16,
+          border: "1.5px solid var(--ink)",
+          background: "var(--surface)",
+          boxShadow: "var(--shadow)",
+        }}
+      >
+        <span style={{ color: "var(--text-2)" }}><Icon name="search" size={compact ? 17 : 19} /></span>
+        <input
+          ref={inputRef}
+          type="search"
+          aria-label="Describe the memory you want to recall"
+          aria-keyshortcuts="/"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="the moody thing with the vocal chop…"
+          maxLength={300}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            background: "none",
+            border: "none",
+            outline: "none",
+            color: "var(--ink)",
+            fontSize: compact ? 15 : 18,
+            padding: "8px 0",
+            caretColor: "var(--accent)",
           }}
-          style={{ marginTop: 12 }}
-        >
-          <motion.div
-            animate={{
-              borderColor: focus ? "var(--accent)" : "var(--line-strong)",
-              boxShadow: focus ? "0 0 0 3px var(--accent-ring)" : "0 0 0 0 transparent",
-            }}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              padding: "5px 5px 5px 12px",
-              borderRadius: 12,
-              border: "1px solid var(--line-strong)",
-              background: "var(--surface)",
-            }}
+        />
+        {compact ? (
+          <button
+            type="submit"
+            aria-label="Recall"
+            disabled={!q.trim()}
+            className="btn btn-ink"
+            style={{ width: 40, height: 40, padding: 0, flexShrink: 0 }}
           >
-            <span style={{ color: focus ? "var(--accent)" : "var(--text-3)" }}>
-              <Icon name="search" size={17} />
-            </span>
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onFocus={() => setFocus(true)}
-              onBlur={() => setFocus(false)}
-              placeholder="describe it…"
-              style={{
-                flex: 1,
-                minWidth: 0,
-                background: "none",
-                border: "none",
-                outline: "none",
-                color: "var(--text)",
-                fontFamily: "var(--font-ui)",
-                fontSize: 14,
-                padding: "9px 0",
-              }}
-            />
-            <motion.button
-              type="submit"
-              disabled={busy || !q.trim()}
-              whileTap={{ scale: 0.96 }}
-              className="btn btn-primary"
-              style={{ padding: "9px 16px", fontSize: 13 }}
-            >
-              {busy ? "searching" : "recall"}
-              {!busy && <Icon name="arrowRight" size={14} stroke={2.2} />}
-            </motion.button>
-          </motion.div>
-        </form>
-      </div>
-
-      <div style={{ padding: 18, flex: 1, overflowY: "auto" }}>
-        {error && (
-          <div
-            style={{
-              padding: "12px 14px",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--red-dim)",
-              border: "1px solid var(--red-border)",
-              color: "var(--red)",
-              fontSize: 13,
-              marginBottom: 14,
-            }}
-          >
-            {error}
-          </div>
+            <Icon name="arrowRight" size={16} stroke={2.2} />
+          </button>
+        ) : (
+          <button type="submit" disabled={!q.trim()} className="btn btn-ink" style={{ padding: "11px 20px" }}>
+            {busy ? "Recalling" : "Recall"} <Icon name="arrowRight" size={15} stroke={2.2} />
+          </button>
         )}
+      </form>
 
-        {busy && (
-          <div style={{ display: "grid", gap: 12 }}>
-            {[0, 1, 2].map((i) => (
-              <motion.div
-                key={i}
-                animate={{ opacity: [0.35, 0.7, 0.35] }}
-                transition={{ duration: 1.4, repeat: Infinity, delay: i * 0.15 }}
-                style={{ height: 104, borderRadius: "var(--radius)", background: "var(--panel-2)", border: "1px solid var(--line)" }}
-              />
-            ))}
-          </div>
-        )}
+      {error && <div role="alert" className="alert">{error}</div>}
 
-        {!busy && !data && (
-          <div style={{ textAlign: "center", padding: "40px 10px" }}>
+      <div aria-live="polite" aria-busy={busy} style={{ display: "grid", gap: 16 }}>
+        {busy ? (
+          <Skeletons />
+        ) : !data ? (
+          <Empty onPick={run} />
+        ) : (
+          <>
             <div
               style={{
-                width: 56,
-                height: 56,
-                margin: "0 auto 14px",
-                borderRadius: "50%",
-                display: "grid",
-                placeItems: "center",
-                color: "var(--accent)",
-                border: "1px solid var(--accent-tint)",
-                background: "var(--accent-dim)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+                fontSize: 13,
+                color: "var(--text-2)",
               }}
             >
-              <Icon name="memory" size={24} stroke={1.7} />
-            </div>
-            <div style={{ fontSize: 15, fontWeight: 650 }}>Ready to recall</div>
-            <p style={{ margin: "6px auto 16px", maxWidth: 320, fontSize: 13, color: "var(--text-3)" }}>
-              Your vault is semantic. Ask for a vibe, a moment, a half-remembered
-              line — Walrus Memory returns the closest matches.
-            </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 7, maxWidth: 380, margin: "0 auto" }}>
-              {EXAMPLES.map((ex) => (
-                <button
-                  key={ex}
-                  onClick={() => run(ex)}
-                  style={{
-                    fontSize: 12.5,
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    background: "var(--panel-2)",
-                    border: "1px solid var(--line)",
-                    color: "var(--text-2)",
-                    cursor: "pointer",
-                    textAlign: "left",
-                  }}
-                >
-                  <span style={{ color: "var(--text-3)" }}>“</span>
-                  {ex}
-                  <span style={{ color: "var(--text-3)" }}>”</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <AnimatePresence mode="wait">
-          {data && !busy && (
-            <motion.div key={data.query} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 12, fontFamily: "var(--font-mono)" }}>
-                {data.results.length} {data.results.length === 1 ? "match" : "matches"} · “{data.query}”
-              </div>
-
-              {data.results.length === 0 ? (
-                <div
-                  style={{
-                    padding: "26px 18px",
-                    textAlign: "center",
-                    borderRadius: "var(--radius)",
-                    border: "1px dashed var(--line-strong)",
-                    color: "var(--text-2)",
-                    fontSize: 13,
-                  }}
-                >
-                  Nothing came back. Capture a few memories, or describe it more loosely.
-                </div>
-              ) : (
-                <motion.div
-                  variants={{ show: { transition: { staggerChildren: 0.06 } } }}
-                  initial="hidden"
-                  animate="show"
-                  style={{ display: "grid", gap: 12 }}
-                >
-                  {data.results.map((r, i) => (
-                    <MemoryCard key={r.blob_id || i} result={r} rank={i} />
-                  ))}
-                </motion.div>
+              <span>
+                {results.length} {results.length === 1 ? "memory" : "memories"}
+                {results.length > 1 ? ", closest first" : ""}
+              </span>
+              {!compact && results.length > 0 && (
+                <Toggle on={showRaw} onChange={setShowRaw} label="Show stored sentences" />
               )}
-            </motion.div>
-          )}
-        </AnimatePresence>
+            </div>
+            {results.length === 0 ? (
+              <div className="card" style={{ padding: "28px 24px", textAlign: "center", color: "var(--text-2)", fontSize: 14 }}>
+                Nothing came back for that. Describe it more loosely, or store a few memories first.
+              </div>
+            ) : (
+              <motion.div
+                key={data.query}
+                initial="hidden"
+                animate="show"
+                variants={{ show: { transition: { staggerChildren: 0.06 } } }}
+                style={{ display: "grid", gap: 16 }}
+              >
+                {results.map((r, i) => (
+                  <MemoryCard key={r.blob_id || i} result={r} rank={i} showRaw={showRaw} compact={compact} />
+                ))}
+              </motion.div>
+            )}
+          </>
+        )}
       </div>
     </section>
   );

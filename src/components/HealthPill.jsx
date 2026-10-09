@@ -1,22 +1,46 @@
 import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
 import { api } from "../api";
 
-/** Live relayer status — full hostname on desktop, compact word on mobile. */
-export default function HealthPill({ onData }) {
-  const [s, setS] = useState({ loading: true });
+/** Map an /api/health response (or failure) to online | read-only | offline. */
+export function healthState(h) {
+  if (!h || h.loading) return "connecting";
+  if (!h.ok) return "offline";
+  return h.writeReady === false ? "read-only" : "online";
+}
 
+const DOT = {
+  connecting: "var(--line-strong)",
+  online: "var(--green)",
+  "read-only": "var(--amber)",
+  offline: "var(--accent)",
+};
+const LABEL = {
+  connecting: "Connecting",
+  online: "Relayer online",
+  "read-only": "Relayer read-only",
+  offline: "Relayer offline",
+};
+const SHORT = { connecting: "Connecting", online: "Online", "read-only": "Read-only", offline: "Offline" };
+
+/** Polls relayer health every 15s and reports it upward. */
+export function useHealth(onData) {
+  const [h, setH] = useState({ loading: true });
   useEffect(() => {
     let alive = true;
     const check = () =>
       api
         .health()
-        .then((h) => {
+        .then((r) => {
           if (!alive) return;
-          setS({ loading: false, ...h });
-          onData?.(h);
+          setH(r);
+          onData?.(r);
         })
-        .catch((e) => alive && setS({ loading: false, ok: false, error: e.message }));
+        .catch((e) => {
+          if (!alive) return;
+          const r = { ok: false, error: e.message };
+          setH(r);
+          onData?.(r);
+        });
     check();
     const t = setInterval(check, 15000);
     return () => {
@@ -24,58 +48,32 @@ export default function HealthPill({ onData }) {
       clearInterval(t);
     };
   }, [onData]);
+  return h;
+}
 
-  const color = s.loading
-    ? "#6f7a8d"
-    : !s.ok
-      ? "var(--red)"
-      : s.writeReady
-        ? "var(--green)"
-        : "var(--amber)";
-
-  const host = (s.relayer || "").replace(/^https?:\/\//, "") || "relayer";
-  const short = s.loading
-    ? "connecting"
-    : !s.ok
-      ? "offline"
-      : s.writeReady
-        ? "online"
-        : "read-only";
-  const full = s.loading ? "connecting…" : !s.ok ? "relayer offline" : s.writeReady ? host : `${host} · read-only`;
-
+/** Status pill: surface, 1px line, 8px dot; the label stays ink. */
+export default function HealthPill({ health, compact = false }) {
+  const s = healthState(health);
   return (
     <span
-      title={s.ok ? `Walrus Memory relayer · namespace ${s.namespace} · write_ready=${s.writeReady}` : s.error || ""}
+      title={health?.error || (health?.namespace ? `namespace ${health.namespace}` : "")}
       style={{
         display: "inline-flex",
         alignItems: "center",
         gap: 8,
-        padding: "6px 11px",
+        padding: "6px 12px",
         borderRadius: 999,
         border: "1px solid var(--line)",
-        background: "var(--panel-2)",
-        fontSize: 12,
-        color: "var(--text-2)",
+        background: "var(--surface)",
+        fontSize: 12.5,
+        fontWeight: 500,
+        color: "var(--ink)",
         whiteSpace: "nowrap",
-        fontFamily: "var(--font-mono)",
         flexShrink: 0,
       }}
     >
-      <motion.span
-        animate={{ opacity: [1, 0.35, 1] }}
-        transition={{ duration: 2.2, repeat: Infinity }}
-        style={{ width: 7, height: 7, borderRadius: "50%", background: color, boxShadow: `0 0 8px ${color}` }}
-      />
-      <span className="hp-full">{full}</span>
-      <span className="hp-short">{short}</span>
-      <style>{`
-        .hp-short { display: inline; }
-        .hp-full { display: none; }
-        @media (min-width: 680px) {
-          .hp-short { display: none; }
-          .hp-full { display: inline; }
-        }
-      `}</style>
+      <span style={{ width: 8, height: 8, borderRadius: "50%", background: DOT[s] }} />
+      {compact ? SHORT[s] : LABEL[s]}
     </span>
   );
 }

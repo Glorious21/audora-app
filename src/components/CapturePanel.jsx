@@ -1,12 +1,10 @@
-import { useState } from "react";
-import TextField from "@mui/material/TextField";
-import MenuItem from "@mui/material/MenuItem";
-import { motion } from "framer-motion";
+import { useEffect, useRef, useState } from "react";
 
-import { api } from "../api";
+import { api, pollJob } from "../api";
 import Icon from "./Icon";
 import StoredReceipt from "./StoredReceipt";
-import { WORK_TYPES, STAGES } from "../lib/format";
+import { StagePicker } from "./Stage";
+import { WORK_TYPES, MUSICAL_TYPES, FIELD_LIMITS, splitTags } from "../lib/format";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const EMPTY = {
@@ -14,204 +12,299 @@ const EMPTY = {
   type: "beat",
   status: "idea",
   date: today(),
-  tags: "",
+  tags: [],
   bpm: "",
   key: "",
   location: "",
   notes: "",
 };
+const isMac = typeof navigator !== "undefined" && /Mac|iP(hone|ad)/.test(navigator.platform);
 
-export default function CapturePanel({ onCaptured }) {
+function Field({ label, htmlFor, children, style }) {
+  return (
+    <div style={{ display: "grid", gap: 6, ...style }}>
+      <label className="label" htmlFor={htmlFor}>{label}</label>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The capture form. After "Store memory" it swaps in place for the receipt,
+ * which follows the remember job until Walrus returns a blob_id.
+ */
+export default function CapturePanel({ onCaptured, onRecall, sheet = false, autoFocus = false }) {
   const [form, setForm] = useState(EMPTY);
+  const [tagDraft, setTagDraft] = useState(null); // null = "+ tag" link, string = editing
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState(null);
+  const [receipt, setReceipt] = useState(null);
   const [error, setError] = useState(null);
+  const formRef = useRef(null);
+  const titleRef = useRef(null);
+  const tagRef = useRef(null);
+
+  const lifetime = useRef(null);
+  useEffect(() => {
+    lifetime.current = new AbortController();
+    return () => lifetime.current.abort();
+  }, []);
+
+  useEffect(() => {
+    if (autoFocus) titleRef.current?.focus();
+  }, [autoFocus]);
+
+  useEffect(() => {
+    if (tagDraft !== null) tagRef.current?.focus();
+  }, [tagDraft !== null]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
-  const musical = ["beat", "song", "sample"].includes(form.type);
+  const musical = MUSICAL_TYPES.includes(form.type);
+  const ready = form.title.trim().length > 0;
 
-  async function submit(e) {
-    e.preventDefault();
-    if (busy) return;
+  function addTags(raw) {
+    const next = splitTags(raw).filter((t) => !form.tags.includes(t));
+    if (next.length) setForm((f) => ({ ...f, tags: [...f.tags, ...next] }));
+  }
+
+  async function store(e) {
+    e?.preventDefault();
+    if (busy || !ready) return;
+    if (tagDraft) addTags(tagDraft);
     setBusy(true);
     setError(null);
-    setResult(null);
+    const tags = [...form.tags, ...(tagDraft ? splitTags(tagDraft) : [])];
+    const body = {
+      ...form,
+      tags: [...new Set(tags)].join(", "),
+      bpm: musical ? form.bpm : "",
+      key: musical ? form.key : "",
+    };
     try {
-      const res = await api.capture(form);
-      setResult(res);
+      const signal = lifetime.current.signal;
+      const res = await api.capture(body, signal);
+      setReceipt(res);
       onCaptured?.(res);
-      if (!res.finalized) poll(res.job_id);
+      if (!res.finalized) {
+        pollJob(res.job_id, {
+          signal,
+          onUpdate: (s) => {
+            setReceipt((r) => (r && r.job_id === s.job_id ? { ...r, ...s } : r));
+            onCaptured?.(s);
+          },
+        });
+      }
     } catch (err) {
-      setError(err.message);
+      if (!lifetime.current.signal.aborted) setError(err.message);
     } finally {
       setBusy(false);
     }
   }
 
-  async function poll(jobId, n = 0) {
-    if (n > 40) return;
-    try {
-      const s = await api.jobStatus(jobId);
-      setResult((r) => (r && r.job_id === jobId ? { ...r, ...s } : r));
-      onCaptured?.({ job_id: jobId, ...s });
-      if (s.finalized || s.status === "failed") return;
-    } catch {
-      /* transient */
-    }
-    setTimeout(() => poll(jobId, n + 1), 4000);
-  }
-
-  function reset() {
+  function clear() {
     setForm({ ...EMPTY, date: today() });
-    setResult(null);
+    setTagDraft(null);
+    setReceipt(null);
     setError(null);
+    setTimeout(() => titleRef.current?.focus(), 0);
   }
 
-  return (
-    <section className="panel" style={{ display: "flex", flexDirection: "column" }}>
-      <div style={{ padding: "16px 18px", borderBottom: "1px solid var(--line)" }}>
-        <div className="kicker">Capture</div>
-        <div style={{ marginTop: 4, fontSize: 15, fontWeight: 650 }}>
-          Save the context around a piece of work
-        </div>
-        <div style={{ fontSize: 12.5, color: "var(--text-3)", marginTop: 2 }}>
-          One structured memory per idea. Stored & encrypted on Walrus.
-        </div>
+  function onKeyDown(e) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      store();
+    } else if (e.key === "Escape" && e.target !== tagRef.current) {
+      e.preventDefault();
+      clear();
+    }
+  }
+
+  const body = receipt ? (
+    <StoredReceipt result={receipt} onRecall={onRecall} onAnother={clear} />
+  ) : (
+    <form ref={formRef} onSubmit={store} onKeyDown={onKeyDown} style={{ display: "grid", gap: 18 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+        <span className="kicker">New memory</span>
+        <span style={{ fontSize: 12, color: "var(--text-2)" }}>Saved as one sentence</span>
       </div>
 
-      <div style={{ padding: 18 }}>
-        {!result ? (
-          <form onSubmit={submit} style={{ display: "grid", gap: 12 }}>
-            <TextField
-              label="Working title"
-              size="small"
-              value={form.title}
-              onChange={set("title")}
-              required
-              fullWidth
-              placeholder="Night Drive Loop"
-            />
+      <Field label="Working title" htmlFor="cap-title">
+        <input
+          id="cap-title"
+          ref={titleRef}
+          className="field field-title"
+          value={form.title}
+          onChange={set("title")}
+          placeholder="Low Tide"
+          maxLength={FIELD_LIMITS.title}
+          required
+          autoComplete="off"
+          style={sheet ? { fontSize: 30 } : undefined}
+        />
+      </Field>
 
-            <div style={{ display: "flex", gap: 10 }}>
-              <TextField select label="Type" size="small" value={form.type} onChange={set("type")} fullWidth>
-                {WORK_TYPES.map((t) => (
-                  <MenuItem key={t} value={t}>
-                    {t}
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField select label="Stage" size="small" value={form.status} onChange={set("status")} fullWidth>
-                {STAGES.map((s) => (
-                  <MenuItem key={s} value={s}>
-                    {s}
-                  </MenuItem>
-                ))}
-              </TextField>
-            </div>
-
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <TextField
-                label="Date"
-                type="date"
-                size="small"
-                value={form.date}
-                onChange={set("date")}
-                InputLabelProps={{ shrink: true }}
-                sx={{ flex: "1 1 150px" }}
-              />
-              {musical && (
-                <>
-                  <TextField label="BPM" type="number" size="small" value={form.bpm} onChange={set("bpm")} sx={{ width: 84 }} />
-                  <TextField label="Key" size="small" value={form.key} onChange={set("key")} sx={{ width: 92 }} />
-                </>
-              )}
-            </div>
-
-            <TextField
-              label="Tags / mood"
-              size="small"
-              value={form.tags}
-              onChange={set("tags")}
-              fullWidth
-              placeholder="afrobeat, moody, night drive"
-              helperText="comma-separated"
-            />
-            <TextField
-              label="Where it lives"
-              size="small"
-              value={form.location}
-              onChange={set("location")}
-              fullWidth
-              placeholder="Drive link, phone voice memo, Ableton project…"
-            />
-            <TextField
-              label="Context — what's the story?"
-              size="small"
-              value={form.notes}
-              onChange={set("notes")}
-              fullWidth
-              multiline
-              minRows={3}
-              placeholder="Made this after the session with Tolu. Hook isn't there yet but the chord movement is the whole vibe."
-            />
-
-            {error && (
-              <div
-                style={{
-                  fontSize: 12.5,
-                  color: "var(--red)",
-                  background: "var(--red-dim)",
-                  border: "1px solid var(--red-border)",
-                  borderRadius: 10,
-                  padding: "10px 12px",
-                }}
-              >
-                {error}
-              </div>
-            )}
-
-            <motion.button
-              type="submit"
-              disabled={busy || !form.title.trim()}
-              whileTap={{ scale: 0.98 }}
-              className="btn btn-primary"
-              style={{
-                marginTop: 2,
-                width: "100%",
-                padding: "13px 16px",
-                fontSize: 14,
-                fontWeight: 650,
-              }}
-            >
-              {busy ? "Storing in Walrus Memory…" : "Store memory"}
-            </motion.button>
-          </form>
-        ) : (
-          <div style={{ display: "grid", gap: 12 }}>
-            <StoredReceipt result={result} />
+      <Field label="Type">
+        <div
+          role="group"
+          aria-label="Type"
+          style={{
+            display: "flex",
+            gap: 6,
+            flexWrap: sheet ? "nowrap" : "wrap",
+            overflowX: sheet ? "auto" : undefined,
+            margin: sheet ? "0 -22px" : undefined,
+            padding: sheet ? "0 22px 2px" : undefined,
+          }}
+        >
+          {WORK_TYPES.map((t) => (
             <button
-              onClick={reset}
-              style={{
-                padding: "11px 16px",
-                borderRadius: 10,
-                border: "1px solid var(--line-strong)",
-                background: "var(--panel-2)",
-                color: "var(--text)",
-                cursor: "pointer",
-                fontSize: 13,
-                fontWeight: 600,
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 7,
-              }}
+              key={t}
+              type="button"
+              className="chip"
+              aria-pressed={form.type === t}
+              onClick={() => setForm((f) => ({ ...f, type: t }))}
             >
-              <Icon name="plus" size={14} stroke={2.2} />
-              Capture another
+              {t}
             </button>
-          </div>
+          ))}
+        </div>
+      </Field>
+
+      <Field label="Stage">
+        <StagePicker value={form.status} onChange={(s) => setForm((f) => ({ ...f, status: s }))} />
+      </Field>
+
+      <div style={{ display: "grid", gridTemplateColumns: musical ? "1.3fr 1fr 1.3fr" : "1fr", gap: 16 }}>
+        <Field label="Date" htmlFor="cap-date">
+          <input id="cap-date" type="date" className="field" value={form.date} onChange={set("date")} />
+        </Field>
+        {musical && (
+          <>
+            <Field label="BPM" htmlFor="cap-bpm">
+              <input
+                id="cap-bpm"
+                className="field mono"
+                inputMode="numeric"
+                value={form.bpm}
+                onChange={(e) => setForm((f) => ({ ...f, bpm: e.target.value.replace(/[^\d.]/g, "").slice(0, 5) }))}
+                placeholder="113"
+              />
+            </Field>
+            <Field label="Key" htmlFor="cap-key">
+              <input
+                id="cap-key"
+                className="field"
+                value={form.key}
+                onChange={set("key")}
+                placeholder="F minor"
+                maxLength={FIELD_LIMITS.key}
+              />
+            </Field>
+          </>
         )}
       </div>
+
+      <Field label="Tags">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", minHeight: 30 }}>
+          {form.tags.map((t) => (
+            <span key={t} className="tag tag-wash">
+              {t}
+              <button
+                type="button"
+                aria-label={`Remove tag ${t}`}
+                onClick={() => setForm((f) => ({ ...f, tags: f.tags.filter((x) => x !== t) }))}
+                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--text-2)", display: "inline-flex" }}
+              >
+                <Icon name="close" size={12} stroke={2} />
+              </button>
+            </span>
+          ))}
+          {tagDraft === null ? (
+            <button type="button" className="link-btn" onClick={() => setTagDraft("")}>
+              <Icon name="plus" size={13} stroke={2.2} /> tag
+            </button>
+          ) : (
+            <input
+              ref={tagRef}
+              aria-label="New tag"
+              className="field"
+              value={tagDraft}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v.endsWith(",")) {
+                  addTags(v);
+                  setTagDraft("");
+                } else setTagDraft(v);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !(e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  addTags(tagDraft);
+                  setTagDraft("");
+                } else if (e.key === "Escape" || (e.key === "Backspace" && !tagDraft)) {
+                  e.preventDefault();
+                  setTagDraft(null);
+                }
+              }}
+              onBlur={() => {
+                addTags(tagDraft);
+                setTagDraft(null);
+              }}
+              placeholder="amapiano, late night"
+              style={{ width: 160, fontSize: 13, padding: "3px 0" }}
+            />
+          )}
+        </div>
+      </Field>
+
+      <Field label="Where it lives" htmlFor="cap-loc">
+        <div style={{ display: "flex", alignItems: "center", gap: 8, borderBottom: "1px solid var(--line-strong)" }}>
+          <span style={{ color: "var(--text-2)" }}><Icon name="folder" size={16} /></span>
+          <input
+            id="cap-loc"
+            className="field mono"
+            value={form.location}
+            onChange={set("location")}
+            placeholder="~/Ableton/2026/lowtide_v3.als"
+            maxLength={FIELD_LIMITS.location}
+            style={{ border: "none", fontSize: 13 }}
+          />
+        </div>
+      </Field>
+
+      <Field label="What's the story?" htmlFor="cap-notes">
+        <textarea
+          id="cap-notes"
+          className="ruled"
+          rows={4}
+          value={form.notes}
+          onChange={set("notes")}
+          maxLength={FIELD_LIMITS.notes}
+          placeholder="Chopped Maya's vocal from the 2 a.m. session. The hook isn't there yet."
+        />
+      </Field>
+
+      {error && <div role="alert" className="alert">{error}</div>}
+
+      <button
+        type="submit"
+        className="btn btn-ink"
+        disabled={busy || !ready}
+        style={{ width: "100%", padding: "14px 20px", justifyContent: "space-between", fontSize: 14.5 }}
+      >
+        <span>{busy ? "Storing memory" : sheet ? "Store memory →" : "Store memory"}</span>
+        {!sheet && (
+          <span className="mono" style={{ fontSize: 12, opacity: 0.7 }}>
+            {isMac ? "⌘ ↵" : "Ctrl ↵"}
+          </span>
+        )}
+      </button>
+    </form>
+  );
+
+  if (sheet) return body;
+  return (
+    <section className="card rise" style={{ padding: 22 }} aria-label="Capture">
+      {body}
     </section>
   );
 }

@@ -10,6 +10,7 @@
  *   POST /api/memories             → capture a piece of work as one memory
  *   GET  /api/memories/status/:id  → poll a remember job
  *   GET  /api/memories/search?q=   → natural-language recall
+ *   POST /api/chat                 → AI chat grounded in the vault
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -17,8 +18,10 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
 
-import { getMemWal, NAMESPACE, withRetry, WORK_TYPES, STAGES } from "./lib/memwal.js";
+import { getMemWal, NAMESPACE, withRetry } from "./lib/memwal.js";
+import { WORK_TYPES, STAGES } from "../shared/memory.js";
 import { memoriesRouter } from "./routes/memories.js";
+import { chatRouter } from "./routes/chat.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = path.resolve(__dirname, "../dist");
@@ -34,7 +37,8 @@ const DIST_DIR = path.resolve(__dirname, "../dist");
 export function createApp({ serveStatic = false } = {}) {
   const app = express();
   app.use(cors());
-  app.use(express.json());
+  app.use(express.json({ limit: "32kb" }));
+  app.disable("x-powered-by");
 
   app.use((req, _res, next) => {
     if (req.url.startsWith("/api")) {
@@ -54,14 +58,30 @@ export function createApp({ serveStatic = false } = {}) {
         "POST /api/memories",
         "GET  /api/memories/status/:jobId",
         "GET  /api/memories/search?q=...",
+        "POST /api/chat",
       ],
     });
   });
 
+  // Every open Studio tab polls /api/health; share one relayer round-trip
+  // between them instead of hitting the relayer per request.
+  let healthCache = { at: 0, promise: null };
+  const HEALTH_TTL_MS = 10_000;
+  const relayerHealth = () => {
+    if (!healthCache.promise || Date.now() - healthCache.at > HEALTH_TTL_MS) {
+      const memwal = getMemWal();
+      const promise = withRetry(() => memwal.health(), { label: "health", tries: 3 });
+      healthCache = { at: Date.now(), promise };
+      promise.catch(() => {
+        if (healthCache.promise === promise) healthCache = { at: 0, promise: null };
+      });
+    }
+    return healthCache.promise;
+  };
+
   app.get("/api/health", async (_req, res) => {
     try {
-      const memwal = getMemWal();
-      const health = await withRetry(() => memwal.health(), { label: "health", tries: 3 });
+      const health = await relayerHealth();
       const acct = process.env.MEMWAL_ACCOUNT_ID || "";
       res.json({
         ok: health.status === "ok",
@@ -82,6 +102,7 @@ export function createApp({ serveStatic = false } = {}) {
   });
 
   app.use("/api/memories", memoriesRouter);
+  app.use("/api/chat", chatRouter);
 
   app.use("/api", (_req, res) => res.status(404).json({ error: "not found" }));
 

@@ -1,32 +1,4 @@
-export const WORK_TYPES = [
-  "beat",
-  "song",
-  "lyrics",
-  "voice note",
-  "concept",
-  "sample",
-  "other",
-];
-
-export const STAGES = ["idea", "rough", "refining", "done"];
-
-export const STAGE_HUE = {
-  idea: "#8b8194",
-  rough: "#ffb25b",
-  refining: "#ff6f91",
-  done: "#4ade80",
-};
-
-/** glyph per work type — simple, legible, on-brand */
-export const TYPE_GLYPH = {
-  beat: "◈",
-  song: "♪",
-  lyrics: "✎",
-  "voice note": "◍",
-  concept: "✦",
-  sample: "▤",
-  other: "◆",
-};
+export { WORK_TYPES, STAGES, MUSICAL_TYPES, FIELD_LIMITS } from "../../shared/memory.js";
 
 export function relativeDate(iso) {
   if (!iso) return "";

@@ -1,97 +1,155 @@
-import { useState } from "react";
 import { motion } from "framer-motion";
 import Icon from "./Icon";
+import Copyable, { shortId } from "./Copyable";
 
-function Row({ label, value, canCopy }) {
-  const [copied, setCopied] = useState(false);
+/** 116px wax-seal, rotated −12°. Dashed and quiet while pending, solid accent once sealed. */
+function Seal({ done }) {
+  const text = done ? "SEALED ON WALRUS · SUI MAINNET · " : "FINALIZING ON WALRUS · HOLD ON · ";
+  const id = done ? "seal-done" : "seal-pending";
+  const ink = done ? "#fff" : "var(--text-2)";
   return (
-    <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-      <span style={{ width: 68, flexShrink: 0, color: "var(--text-3)", fontSize: 11 }}>{label}</span>
-      <span
-        className="mono"
-        style={{ flex: 1, minWidth: 0, wordBreak: "break-all", fontSize: 12, color: "var(--text)" }}
-      >
-        {value}
-      </span>
-      {canCopy && (
-        <button
-          onClick={() => {
-            navigator.clipboard?.writeText(value);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1400);
-          }}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 4,
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: "var(--text-3)",
-            fontSize: 11,
-          }}
-        >
-          <Icon name={copied ? "check" : "copy"} size={11} />
-          {copied ? "copied" : "copy"}
-        </button>
+    <motion.svg
+      key={id}
+      width="116"
+      height="116"
+      viewBox="0 0 116 116"
+      aria-hidden
+      initial={done ? { scale: 1.15, rotate: -20, opacity: 0 } : false}
+      animate={{ scale: 1, rotate: -12, opacity: 1 }}
+      transition={{ duration: 0.4, ease: "easeOut" }}
+      style={{ flexShrink: 0, rotate: -12 }}
+    >
+      <defs>
+        <path id={id} d="M58 58m-41 0a41 41 0 1 1 82 0a41 41 0 1 1 -82 0" />
+      </defs>
+      <circle
+        cx="58"
+        cy="58"
+        r="54"
+        fill={done ? "var(--accent-strong)" : "none"}
+        stroke={done ? "var(--accent-strong)" : "var(--line-strong)"}
+        strokeWidth="2"
+        strokeDasharray={done ? undefined : "4 4"}
+      />
+      <circle cx="58" cy="58" r="33" fill="none" stroke={done ? "rgba(255,255,255,.6)" : "var(--line-strong)"} strokeWidth="1.25" />
+      <text fontFamily="var(--font-mono)" fontSize="9" letterSpacing="1.4" fill={ink}>
+        <textPath href={`#${id}`}>{text}{text}</textPath>
+      </text>
+      {done ? (
+        <path d="M45 58l9 9 18-19" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+      ) : (
+        [46, 58, 70].map((x, i) => (
+          <motion.circle
+            key={x}
+            cx={x}
+            cy="58"
+            r="3"
+            fill="var(--text-2)"
+            animate={{ opacity: [0.3, 1, 0.3] }}
+            transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2 }}
+          />
+        ))
       )}
+    </motion.svg>
+  );
+}
+
+function Row({ label, value, state }) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "64px 1fr auto",
+        alignItems: "center",
+        gap: 12,
+        padding: "11px 0",
+        borderTop: "1px solid var(--line)",
+        fontSize: 13,
+      }}
+    >
+      <span className="mono" style={{ color: "var(--text-2)", fontSize: 12 }}>{label}</span>
+      <span style={{ minWidth: 0 }}>
+        {value ? (
+          <Copyable value={value} label={label}>{shortId(value, 12, 6)}</Copyable>
+        ) : (
+          <span style={{ color: "var(--text-2)" }}>waiting for Walrus</span>
+        )}
+      </span>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--ink)" }}>
+        {state === "pending" ? (
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--amber)" }} />
+        ) : (
+          <span style={{ color: "var(--green)" }}><Icon name="check" size={14} stroke={2.4} /></span>
+        )}
+        {state}
+      </span>
     </div>
   );
 }
 
-export default function StoredReceipt({ result }) {
-  const done = result.finalized;
+export default function StoredReceipt({ result, onRecall, onAnother }) {
+  const done = !!result.finalized;
+  const failed = result.status === "failed";
+  const title = result.fields?.title || "your memory";
+
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      style={{
-        borderRadius: "var(--radius)",
-        border: `1px solid ${done ? "rgba(22,163,74,0.35)" : "var(--accent-tint)"}`,
-        background: `linear-gradient(180deg, ${done ? "var(--green-dim)" : "var(--accent-dim)"}, var(--surface))`,
-        padding: 15,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          fontWeight: 650,
-          fontSize: 13,
-          marginBottom: 11,
-          color: done ? "var(--green)" : "var(--accent-strong)",
-        }}
-      >
-        <Icon name={done ? "check" : "clock"} size={15} stroke={2.2} />
-        {done ? "Stored on Walrus" : "Accepted — relayer finalizing"}
+    <div className="rise" style={{ display: "grid", gap: 18 }} aria-live="polite">
+      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", justifyContent: "space-between" }}>
+        <div style={{ minWidth: 0 }}>
+          <div className="kicker">{done ? "Stored" : failed ? "Not stored" : "Storing"}</div>
+          <h2 style={{ fontSize: 30, marginTop: 8, lineHeight: 1.1 }}>
+            {done ? (
+              <>
+                {title} is <em>on Walrus</em>.
+              </>
+            ) : failed ? (
+              <>
+                Walrus <em>didn't take it</em>.
+              </>
+            ) : (
+              <>
+                Writing <em>{title}</em> to Walrus
+              </>
+            )}
+          </h2>
+          <p style={{ marginTop: 10, fontSize: 14, color: "var(--text-2)" }}>
+            {done
+              ? "Encrypted and finalized. Describe it any way you like and it will come back."
+              : failed
+                ? result.error || "The relayer reported a failure. Try storing it again."
+                : "The relayer has it. Walrus is finalizing the blob, which usually takes a few seconds."}
+          </p>
+        </div>
+        <Seal done={done} />
       </div>
 
-      <div style={{ display: "grid", gap: 7 }}>
-        <Row label="job_id" value={result.job_id} canCopy />
-        <Row label="blob_id" value={result.blob_id || "writing to Walrus…"} canCopy={!!result.blob_id} />
-        <Row label="status" value={result.status} />
-        <Row label="namespace" value={result.namespace || "audora-demo"} />
+      <div>
+        <Row label="job_id" value={result.job_id} state="written" />
+        <div style={{ borderBottom: "1px solid var(--line)" }}>
+          <Row label="blob_id" value={result.blob_id} state={done ? "finalized" : "pending"} />
+        </div>
       </div>
 
-      <div className="kicker" style={{ marginTop: 11, marginBottom: 5, letterSpacing: "0.1em" }}>
-        exact memory stored
+      {!done && !failed && (
+        <div style={{ height: 4, borderRadius: 999, background: "var(--line)", overflow: "hidden" }}>
+          <motion.div
+            style={{ height: "100%", width: "40%", borderRadius: 999, background: "var(--accent)" }}
+            animate={{ x: ["-100%", "250%"] }}
+            transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+          />
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {done && (
+          <button type="button" className="btn btn-ghost" onClick={() => onRecall?.(title)}>
+            Recall it
+          </button>
+        )}
+        <button type="button" className="btn btn-ink" onClick={onAnother} style={{ flex: done ? undefined : 1 }}>
+          Capture another <Icon name="plus" size={14} stroke={2.2} />
+        </button>
       </div>
-      <p
-        className="mono"
-        style={{
-          margin: 0,
-          fontSize: 11.5,
-          lineHeight: 1.6,
-          color: "var(--text-2)",
-          background: "var(--bg-deep)",
-          border: "1px solid var(--line)",
-          borderRadius: "var(--radius-sm)",
-          padding: "10px 12px",
-        }}
-      >
-        {result.memoryText}
-      </p>
-    </motion.div>
+    </div>
   );
 }

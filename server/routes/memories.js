@@ -3,50 +3,23 @@
  * Walrus Memory, and recall it later with a natural-language query.
  */
 import { Router } from "express";
-import {
-  getMemWal,
-  formatMemory,
-  withRetry,
-  pollRememberJob,
-  WORK_TYPES,
-  STAGES,
-} from "../lib/memwal.js";
+import { getMemWal, withRetry, pollRememberJob } from "../lib/memwal.js";
+import { formatMemory, parseMemory, validateCapture } from "../../shared/memory.js";
 
 export const memoriesRouter = Router();
 
 /**
  * POST /api/memories
  * body: { title, type, date, tags, status, bpm, key, location, notes }
+ * (validated by validateCapture in shared/memory.js)
  *
  * Formats the fields into the canonical memory sentence, stores it via
  * remember(), then polls the job briefly. Always returns the job_id (proof of
  * storage); blob_id is included once the relayer finalizes.
  */
 memoriesRouter.post("/", async (req, res) => {
-  const body = req.body ?? {};
-  const title = String(body.title ?? "").trim();
-
-  if (!title) {
-    return res.status(400).json({ error: "title is required" });
-  }
-  if (body.type && !WORK_TYPES.includes(body.type)) {
-    return res.status(400).json({ error: `type must be one of: ${WORK_TYPES.join(", ")}` });
-  }
-  if (body.status && !STAGES.includes(body.status)) {
-    return res.status(400).json({ error: `status must be one of: ${STAGES.join(", ")}` });
-  }
-
-  const fields = {
-    title,
-    type: body.type || "other",
-    date: body.date || new Date().toISOString().slice(0, 10),
-    tags: body.tags,
-    status: body.status || "idea",
-    bpm: body.bpm,
-    key: body.key,
-    location: body.location,
-    notes: body.notes,
-  };
+  const { fields, error } = validateCapture(req.body ?? {});
+  if (error) return res.status(400).json({ error });
   const memoryText = formatMemory(fields);
 
   try {
@@ -84,13 +57,16 @@ memoriesRouter.post("/", async (req, res) => {
  * GET /api/memories/status/:jobId — poll a remember job until finalized.
  */
 memoriesRouter.get("/status/:jobId", async (req, res) => {
+  if (!/^[\w-]{1,64}$/.test(req.params.jobId)) {
+    return res.status(400).json({ error: "invalid job id" });
+  }
   try {
     const memwal = getMemWal();
     const status = await withRetry(
       () => memwal.getRememberStatus(req.params.jobId),
       { label: "getRememberStatus", tries: 3 },
     );
-    return res.json({
+    return res.status(status.status === "not_found" ? 404 : 200).json({
       job_id: status.job_id,
       status: status.status,
       blob_id: status.blob_id ?? null,
@@ -111,6 +87,9 @@ memoriesRouter.get("/search", async (req, res) => {
   if (!query) {
     return res.status(400).json({ error: "query param q is required" });
   }
+  if (query.length > 300) {
+    return res.status(400).json({ error: "query must be 300 characters or fewer" });
+  }
 
   try {
     const memwal = getMemWal();
@@ -126,20 +105,27 @@ memoriesRouter.get("/search", async (req, res) => {
       await new Promise((r) => setTimeout(r, 1200));
     }
 
-    return res.json({
-      query,
-      total: result.total ?? result.results.length,
-      results: result.results.map((r) => ({
+    // The same idea captured more than once (re-running the demo, re-saving
+    // with tweaked notes) comes back as several hits. Results arrive closest
+    // first, so keep only the best match per type + title.
+    const seen = new Set();
+    const results = [];
+    for (const r of result.results) {
+      const fields = parseMemory(r.text);
+      const id = fields.title ? `${fields.type}|${fields.title.toLowerCase()}` : r.text;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      results.push({
         text: r.text,
         distance: r.distance,
         relevance:
-          typeof r.distance === "number"
-            ? Math.max(0, Math.min(1, 1 - r.distance))
-            : null,
+          typeof r.distance === "number" ? Math.max(0, Math.min(1, 1 - r.distance)) : null,
         blob_id: r.blob_id,
-        fields: parseMemory(r.text),
-      })),
-    });
+        fields,
+      });
+    }
+
+    return res.json({ query, total: results.length, results });
   } catch (err) {
     console.error("GET /api/memories/search failed:", err);
     return res
@@ -147,25 +133,3 @@ memoriesRouter.get("/search", async (req, res) => {
       .json({ error: "Failed to search Walrus Memory", detail: err.message });
   }
 });
-
-/** Pull structured fields back out of the canonical memory sentence. */
-export function parseMemory(text = "") {
-  const seg = (label, next) => {
-    const re = new RegExp(`${label}:\\s*(.*?)\\s*(?:\\.\\s*${next}:|\\.?\\s*$)`, "s");
-    const m = text.match(re);
-    return m ? m[1].trim().replace(/^—$/, "") : "";
-  };
-  const head = text.match(/^\s*(.+?)\s+—\s+"(.*?)"\./s);
-  const bpm = seg("Tempo", "Key").replace(/\s*BPM$/i, "").replace(/^—$/, "");
-  return {
-    type: head ? head[1].trim().toLowerCase() : "",
-    title: head ? head[2].trim() : "",
-    date: seg("Captured on", "Stage"),
-    status: seg("Stage", "Tags"),
-    tags: seg("Tags", "Tempo"),
-    bpm,
-    key: seg("Key", "Where it lives"),
-    location: seg("Where it lives", "Context"),
-    notes: seg("Context", "\\0"),
-  };
-}

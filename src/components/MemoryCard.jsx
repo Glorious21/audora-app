@@ -1,179 +1,155 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import RelevanceRing from "./RelevanceRing";
-import Icon from "./Icon";
-import { STAGE_HUE, TYPE_GLYPH, relativeDate, splitTags } from "../lib/format";
+import Icon, { TYPE_ICON } from "./Icon";
+import Copyable, { shortId } from "./Copyable";
+import { StageMarker } from "./Stage";
+import { relativeDate, splitTags } from "../lib/format";
 
-const cardV = {
-  hidden: { opacity: 0, y: 14 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.22, 1, 0.36, 1] } },
+export const cardRise = {
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.3, ease: "easeOut" } },
 };
 
-export default function MemoryCard({ result, rank }) {
+/** Index-card result: header, accent rule, ruled notes, tags, footer strip. */
+export default function MemoryCard({ result, rank, showRaw: showRawAll = false, compact = false }) {
   const f = result.fields || {};
-  const [showRaw, setShowRaw] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [showRaw, setShowRaw] = useState(showRawAll);
+  useEffect(() => setShowRaw(showRawAll), [showRawAll]);
   const top = rank === 0;
-
-  const meta = [
-    f.status,
-    f.date && relativeDate(f.date),
-    f.bpm && `${f.bpm} BPM`,
-    f.key,
-  ].filter(Boolean);
-
-  const copyBlob = () => {
-    navigator.clipboard?.writeText(result.blob_id || "");
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1400);
-  };
+  const tags = splitTags(f.tags);
+  const music = [f.bpm && `${f.bpm} BPM`, f.key].filter(Boolean).join(" · ");
+  const when = f.date ? relativeDate(f.date) : "";
 
   return (
     <motion.article
-      variants={cardV}
-      whileHover={{ y: -2 }}
-      style={{
-        position: "relative",
-        borderRadius: "var(--radius)",
-        padding: "16px",
-        background: top ? "linear-gradient(180deg, var(--accent-dim), var(--surface))" : "var(--surface)",
-        border: `1px solid ${top ? "var(--accent-tint)" : "var(--line)"}`,
-        boxShadow: top ? "var(--shadow-md)" : "var(--shadow-sm)",
-      }}
+      variants={cardRise}
+      className="card lift"
+      style={{ overflow: "hidden", padding: 0 }}
     >
-      <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: compact ? "1fr auto" : "40px 1fr auto",
+          gap: 14,
+          padding: compact ? "16px 16px 12px" : "18px 20px 14px",
+          alignItems: "start",
+        }}
+      >
+        {!compact && (
+          <span
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 10.5,
-              fontWeight: 600,
-              letterSpacing: "0.1em",
-              textTransform: "uppercase",
-              color: top ? "var(--amber)" : "var(--text-3)",
-              marginBottom: 6,
+              width: 40,
+              height: 40,
+              borderRadius: 12,
+              background: "var(--wash)",
+              color: "var(--accent-strong)",
+              display: "grid",
+              placeItems: "center",
             }}
           >
-            <span style={{ fontSize: 13 }}>{TYPE_GLYPH[f.type] || "◆"}</span>
+            <Icon name={TYPE_ICON[f.type] || "dot"} size={19} />
+          </span>
+        )}
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: ".1em",
+              textTransform: "uppercase",
+              color: "var(--text-2)",
+            }}
+          >
             {f.type || "memory"}
-            {top && <span style={{ marginLeft: 6, color: "var(--amber)" }}>· best match</span>}
+            {when && ` · ${when}`}
           </div>
-
-          <h3 style={{ margin: 0, fontSize: 16.5, fontWeight: 650, lineHeight: 1.3, letterSpacing: "-0.01em" }}>
+          <h3 className="display" style={{ fontSize: compact ? 23 : 28, marginTop: 4, lineHeight: 1.1, overflowWrap: "anywhere" }}>
             {f.title || "Untitled"}
           </h3>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px 16px", marginTop: 10 }}>
+            {f.status && <StageMarker stage={f.status} />}
+            {music && (
+              <span className="mono" style={{ fontSize: 12, color: "var(--text-2)" }}>{music}</span>
+            )}
+          </div>
         </div>
-
-        <RelevanceRing value={result.relevance ?? 0} />
+        <RelevanceRing value={result.relevance ?? 0} top={top} size={compact ? 44 : 56} />
       </div>
 
-      {meta.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 11 }}>
-          {meta.map((m, i) => (
-            <span
-              key={i}
+      <div style={{ margin: compact ? "0 16px" : "0 20px", height: 1, background: "var(--accent)", opacity: 0.5 }} />
+
+      {(f.notes || tags.length > 0) && (
+        <div style={{ padding: compact ? "6px 16px 14px" : "6px 20px 16px" }}>
+          {f.notes && (
+            <p
               style={{
-                fontSize: 11.5,
-                padding: "3px 8px",
-                borderRadius: 6,
-                background: "var(--panel-2)",
-                border: "1px solid var(--line)",
-                color: i === 0 && f.status ? STAGE_HUE[f.status] || "var(--text-2)" : "var(--text-2)",
-                fontFamily: "var(--font-mono)",
+                fontSize: 14.5,
+                lineHeight: "28px",
+                backgroundImage: "linear-gradient(to bottom, transparent 27px, var(--line) 27px, var(--line) 28px)",
+                backgroundSize: "100% 28px",
               }}
             >
-              {m}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {splitTags(f.tags).length > 0 && (
-        <div style={{ marginTop: 9, fontSize: 12.5, color: "var(--text-3)" }}>
-          {splitTags(f.tags).map((t, i) => (
-            <span key={i}>
-              {i > 0 && " · "}
-              {t}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {f.notes && (
-        <p style={{ margin: "11px 0 0", fontSize: 13.5, color: "var(--text)", lineHeight: 1.6 }}>
-          {f.notes}
-        </p>
-      )}
-
-      {f.location && (
-        <div style={{ marginTop: 9, fontSize: 12, color: "var(--text-3)" }}>
-          lives in — <span style={{ color: "var(--text-2)" }}>{f.location}</span>
+              {f.notes}
+            </p>
+          )}
+          {tags.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
+              {tags.map((t) => (
+                <span key={t} className="tag">{t}</span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
       <div
         style={{
-          marginTop: 13,
-          paddingTop: 11,
-          borderTop: "1px solid var(--line)",
           display: "flex",
           alignItems: "center",
-          gap: 12,
-          flexWrap: "wrap",
-          fontSize: 11,
-          fontFamily: "var(--font-mono)",
-          color: "var(--text-3)",
+          gap: 16,
+          padding: compact ? "10px 16px" : "10px 20px",
+          borderTop: "1px solid var(--line)",
+          background: "color-mix(in srgb, var(--bg) 60%, var(--surface))",
+          fontSize: 12,
         }}
       >
-        <span>distance {result.distance?.toFixed?.(3)}</span>
-        <button
-          onClick={copyBlob}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 5,
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: "inherit",
-            font: "inherit",
-            padding: 0,
-          }}
-        >
-          <Icon name={copied ? "check" : "shield"} size={12} />
-          {copied ? "blob id copied" : `blob ${(result.blob_id || "").slice(0, 12)}…`}
-        </button>
-        <button
-          onClick={() => setShowRaw((v) => !v)}
-          style={{
-            marginLeft: "auto",
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: "var(--text-3)",
-            font: "inherit",
-            textDecoration: "underline",
-            textUnderlineOffset: 3,
-          }}
-        >
-          {showRaw ? "hide" : "raw memory"}
-        </button>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 7, minWidth: 0, flex: 1, color: "var(--text-2)" }}>
+          <Icon name="folder" size={14} />
+          <span className="mono" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--ink)" }}>
+            {f.location || "—"}
+          </span>
+        </span>
+        {!compact && result.blob_id && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--text-2)" }}>
+            blob
+            <Copyable value={result.blob_id} label="blob id">{shortId(result.blob_id, 6, 4)}</Copyable>
+          </span>
+        )}
+        {!compact && (
+          <button
+            type="button"
+            className="link-btn"
+            aria-expanded={showRaw}
+            onClick={() => setShowRaw((v) => !v)}
+          >
+            Stored sentence
+            <Icon name="chevronDown" size={14} style={{ transform: showRaw ? "rotate(180deg)" : "none" }} />
+          </button>
+        )}
       </div>
 
       {showRaw && (
         <p
+          className="mono"
           style={{
-            margin: "9px 0 0",
+            padding: compact ? "12px 16px" : "14px 20px",
+            borderTop: "1px dashed var(--line-strong)",
+            background: "var(--bg)",
             fontSize: 12,
-            lineHeight: 1.6,
-            color: "var(--text-3)",
-            background: "var(--bg-deep)",
-            border: "1px solid var(--line)",
-            borderRadius: "var(--radius-sm)",
-            padding: "10px 12px",
-            fontFamily: "var(--font-mono)",
+            lineHeight: 1.65,
+            color: "var(--ink)",
+            overflowWrap: "anywhere",
           }}
         >
           {result.text}

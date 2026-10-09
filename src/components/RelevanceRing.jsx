@@ -1,45 +1,46 @@
 import { motion } from "framer-motion";
 
-/** Circular % match indicator that draws itself in. */
-export default function RelevanceRing({ value = 0, size = 44 }) {
-  const pct = Math.round((value || 0) * 100);
-  const r = (size - 6) / 2;
+/** Match ring: 4px stroke on a --line track; accent for the top result. */
+export default function RelevanceRing({ value = 0, size = 56, top = false }) {
+  const pct = Math.round(Math.max(0, Math.min(1, value || 0)) * 100);
+  const r = (size - 4) / 2;
   const c = 2 * Math.PI * r;
-  const hue = pct >= 55 ? "var(--green)" : pct >= 35 ? "var(--accent)" : "var(--text-3)";
+  const compact = size < 50;
 
   return (
-    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
-      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-3)" strokeWidth={3} />
+    <div
+      role="img"
+      aria-label={`${pct}% match`}
+      style={{ position: "relative", width: size, height: size, flexShrink: 0 }}
+    >
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)", display: "block" }}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--line)" strokeWidth={4} />
         <motion.circle
           cx={size / 2}
           cy={size / 2}
           r={r}
           fill="none"
-          stroke={hue}
-          strokeWidth={3}
+          stroke={top ? "var(--accent)" : "var(--text-2)"}
+          strokeWidth={4}
           strokeLinecap="round"
           strokeDasharray={c}
           initial={{ strokeDashoffset: c }}
-          animate={{ strokeDashoffset: c - (c * pct) / 100 }}
-          transition={{ duration: 0.9, ease: "easeOut", delay: 0.12 }}
+          animate={{ strokeDashoffset: c * (1 - pct / 100) }}
+          transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
         />
       </svg>
       <div
         style={{
           position: "absolute",
           inset: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 11.5,
-          fontWeight: 700,
-          color: hue,
-          fontVariantNumeric: "tabular-nums",
-          fontFamily: "var(--font-mono)",
+          display: "grid",
+          placeItems: "center",
+          alignContent: "center",
+          lineHeight: 1.05,
         }}
       >
-        {pct}
+        <span style={{ fontSize: compact ? 13 : 15, fontWeight: 650 }}>{pct}</span>
+        {!compact && <span style={{ fontSize: 10.5, color: "var(--text-2)" }}>match</span>}
       </div>
     </div>
   );
